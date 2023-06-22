@@ -1,0 +1,6 @@
+[submodule "src/ros2_aruco"]
+	path = src/ros2_aruco
+	url = https://github.com/JMU-ROBOTICS-VIVA/ros2_aruco.git
+[submodule "src/ros2_brickpi3"]
+	path = src/ros2_brickpi3
+	url = https://github.com/artificiell/ros2_brickpi3.git
