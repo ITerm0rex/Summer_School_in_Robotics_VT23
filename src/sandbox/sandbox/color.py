@@ -70,12 +70,9 @@ def main(args=None):
         try:
             rclpy.spin(color_sensor)
         finally:
-            color_sensor.reset()
             color_sensor.destroy_node()
-            try:
-                rclpy.shutdown()
-            except:
-                pass
+            color_sensor.reset()
+            rclpy.try_shutdown()
     except KeyboardInterrupt:
         pass
 

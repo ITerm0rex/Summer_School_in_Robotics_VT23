@@ -40,10 +40,10 @@ class UltrasonicSensor(Node):
             msg.data = self.brick.get_sensor(self.port)
             self.publisher_.publish(msg)
         except brickpi3.SensorError as e:
+            self.get_logger().error(f"Ultrasonic sensor: {e}", throttle_duration_sec=1)
             self.brick.set_sensor_type(
                 self.port, self.brick.SENSOR_TYPE.EV3_ULTRASONIC_CM
             )
-            self.get_logger().error(f"Ultrasonic sensor: {e}", throttle_duration_sec=1)
 
     # Reset all sensor ports
     def reset(self):
@@ -59,12 +59,9 @@ def main(args=None):
         try:
             rclpy.spin(ultrasonic_sensor)
         finally:
-            ultrasonic_sensor.reset()
             ultrasonic_sensor.destroy_node()
-            try:
-                rclpy.shutdown()
-            except:
-                pass
+            ultrasonic_sensor.reset()
+            rclpy.try_shutdown()
     except KeyboardInterrupt:
         pass
 

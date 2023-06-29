@@ -3,7 +3,7 @@ import asyncio
 import time
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Int32, String, Float32
+from std_msgs.msg import Bool, Int32, Float32, String
 
 from rclpy.duration import Duration
 
@@ -38,10 +38,10 @@ class BMP(Node):
         self.right_publisher = self.create_publisher(Int32, "right/speed", 10)
 
         # self.left_encoder_subscription = self.create_subscription(
-        #     Int32, "encoder", self.left_encoder_callback, 10
+        #     Int32, "left/encoder", self.left_encoder_callback, 10
         # )
         # self.right_encoder_subscription = self.create_subscription(
-        #     Int32, "encoder", self.right_encoder_callback, 10
+        #     Int32, "right/encoder", self.right_encoder_callback, 10
         # )
 
         self.color_subscription = self.create_subscription(
@@ -52,6 +52,14 @@ class BMP(Node):
             Float32, "ultrasonic", self.ultrasonic_callback, 10
         )
 
+        self.gyro_subscription = self.create_subscription(
+            Float32, "gyro", self.gyro_callback, 10
+        )
+
+        self.touch_subscription = self.create_subscription(
+            Bool, "touch", self.touch_callback, 10
+        )
+
         self.key_press_subscription = self.create_subscription(
             String, "press", self.key_press_callback, 10
         )
@@ -60,15 +68,19 @@ class BMP(Node):
         #     String, "release", self.key_release_callback, 10
         # )
 
-    def go_dps(self, left_dps: int = 0, right_dps: int = 0):
-        left_msg = Int32()
-        left_msg.data = int(left_dps)
-
+    def go_right_dps(self, right_dps: int = 0):
         right_msg = Int32()
         right_msg.data = int(right_dps)
-
-        self.left_publisher.publish(left_msg)
         self.right_publisher.publish(right_msg)
+
+    def go_left_dps(self, left_dps: int = 0):
+        left_msg = Int32()
+        left_msg.data = int(left_dps)
+        self.left_publisher.publish(left_msg)
+
+    def go_dps(self, left_dps: int = 0, right_dps: int = 0):
+        self.go_left_dps(left_dps)
+        self.go_right_dps(right_dps)
 
     def go_mps(self, left_mps: int = 0, right_mps: int = 0):
         self.go_dps(
@@ -76,20 +88,23 @@ class BMP(Node):
             360 / (math.pi * WHEEL_DIAMETER) * right_mps,
         )
 
-    def key_to_motor(self, key):
+    def key_to_motor(self, key: str):
         KEY_DIR_MAP = {
             "w": [360, 360],
-            "d": [360, -360],
-            "s": [-360, -360],
             "a": [-360, 360],
+            "s": [-360, -360],
+            "d": [360, -360],
+            "e": [360, 0],
+            "q": [0, 360],
         }
 
         dir = KEY_DIR_MAP.get(key, [0, 0])
-        dir = [int(e * 1.2) for e in dir]
+        dir = [int(e * self.wasd_speed) for e in dir]
         self.go_dps(*dir)
 
     # 1
     async def move_square(self, delay=5, mps=0.1):
+        self.is_running = True
         while self.is_running:
             self.go_mps(mps, mps)
             await asyncio.sleep(delay)
@@ -104,6 +119,7 @@ class BMP(Node):
 
     # 3
     async def move_figure_eight(self, delay=2, mps=0.1):
+        self.is_running = True
         while self.is_running:
             self.go_mps(mps, mps / 2)
             await asyncio.sleep(5)
@@ -178,6 +194,7 @@ class BMP(Node):
 
     event_callback_set = dict()
     is_running = True
+    wasd_speed = 1.0
 
     def key_press_callback(self, msg: String):
         self.get_logger().info(f"key press: {msg.data}")
@@ -197,14 +214,30 @@ class BMP(Node):
         elif key == "5":
             self.go_mps(0.1, 0.1)
             pass
+        elif key == "6":
+            self.event_callback_set["touch"] = (
+                lambda touched: self.bp3.reset_all() if touched else None
+            )
+            pass
+        elif key == "7":
+            self.bp3.reset_all()
+            pass
+        elif key == "8":
+            self.wasd_speed = (int(self.wasd_speed * 10) - 2) / 10
+            self.get_logger().info(f"wasd_speed: {self.wasd_speed}")
+            pass
+        elif key == "9":
+            self.wasd_speed = (int(self.wasd_speed * 10) + 2) / 10
+            self.get_logger().info(f"wasd_speed: {self.wasd_speed}")
+            pass
         elif key == "0":
-            self.is_running ^= True
+            self.is_running = False
             self.event_callback_set.clear()
             self.bp3.reset_motors()
             self.get_logger().info(f"is running: {self.is_running}")
 
         # elif key == "space":
-        # self.bp3.reset_motors()
+        #     self.bp3.reset_motors()
         else:
             self.key_to_motor(key)
 
@@ -213,26 +246,37 @@ class BMP(Node):
 
     # Read color module
     def color_callback(self, msg: String):
-        cb = self.event_callback_set.get("color", None)
-        if cb:
+        if cb := self.event_callback_set.get("color", None):
             cb(msg.data)
         self.get_logger().info(f"color: {msg.data}", throttle_duration_sec=1)
 
     # Read ultrasonic module
     def ultrasonic_callback(self, msg: Float32):
-        cb = self.event_callback_set.get("ultrasonic", None)
-        if cb:
+        if cb := self.event_callback_set.get("ultrasonic", None):
             cb(msg.data)
         self.get_logger().info(f"ultrasonic: {msg.data}", throttle_duration_sec=1)
 
-    # # Read and publish motor encoder value
-    # def left_encoder_callback(self, msg: Int32):
-    #     self.get_logger().info(f"left encoder: {msg.data}")
+    # Read touch module
+    def touch_callback(self, msg: Bool):
+        if cb := self.event_callback_set.get("touch", None):
+            cb(msg.data)
+        self.get_logger().info(f"touch: {msg.data}", throttle_duration_sec=1)
 
-    # def right_encoder_callback(self, msg: Int32):
-    #     self.get_logger().info(f"right encoder: {msg.data}")
+    # Read gyro module
+    def gyro_callback(self, msg: Float32):
+        if cb := self.event_callback_set.get("gyro", None):
+            cb(msg.data)
+        self.get_logger().info(f"gyro: {msg.data}", throttle_duration_sec=1)
 
-    def stop(self):
+    # Read motor encoder value
+    def left_encoder_callback(self, msg: Int32):
+        self.get_logger().info(f"left encoder: {msg.data}", throttle_duration_sec=1)
+
+    def right_encoder_callback(self, msg: Int32):
+        self.get_logger().info(f"right encoder: {msg.data}", throttle_duration_sec=1)
+
+    # Reset sensor and motor port
+    def reset(self):
         self.bp3.reset_all()
 
 
@@ -246,11 +290,8 @@ def main(args=None):
             rclpy.spin(bmp)
         finally:
             bmp.destroy_node()
-            bmp.stop()
-            try:
-                rclpy.shutdown()
-            except:
-                pass
+            bmp.reset()
+            rclpy.try_shutdown()
     except KeyboardInterrupt:
         pass
 

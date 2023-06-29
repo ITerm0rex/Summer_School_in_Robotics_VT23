@@ -45,7 +45,7 @@ class MotorController(Node):
         self.timer = self.create_timer(timer_period, self.encoder_callback)
 
     # Write and set motor speed
-    def speed_callback(self, msg):
+    def speed_callback(self, msg: Int32):
         try:
             speed = msg.data
             speed = self.limit if speed > self.limit else speed
@@ -64,20 +64,14 @@ class MotorController(Node):
             self.get_logger().error(f"Motor controller: {e}", throttle_duration_sec=1)
 
     # Reset all motor ports
-    def stop(self):
-        # try:
-        #     self.brick.set_motor_dps(self.port, 0)
-        #     self.brick.reset_motor_encoder(self.port)
-        # except IOError as e:
-        #     self.get_logger().error(f"Motor controller: {e}", throttle_duration_sec = 1)
-        # finally:
-        #     self.brick.set_motor_power(self.port, self.brick.MOTOR_FLOAT)
+    def reset(self):
         try:
             self.brick.set_motor_dps(self.port, 0)
+            self.brick.reset_motor_encoder(self.port)
         except IOError as e:
             self.get_logger().error(f"Motor controller: {e}", throttle_duration_sec=1)
         finally:
-            self.brick.reset_all()
+            self.brick.set_motor_power(self.port, self.brick.MOTOR_FLOAT)
 
 
 # Main function
@@ -89,12 +83,9 @@ def main(args=None):
         try:
             rclpy.spin(motor_controller)
         finally:
-            motor_controller.stop()
             motor_controller.destroy_node()
-            try:
-                rclpy.shutdown()
-            except:
-                pass
+            motor_controller.reset()
+            rclpy.try_shutdown()
     except KeyboardInterrupt:
         pass
 

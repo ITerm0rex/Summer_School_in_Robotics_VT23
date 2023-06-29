@@ -21,13 +21,13 @@ class Shell_Input(Node):
             on_release=self.release,
         )
 
-    def press(self, key):
+    def press(self, key: str):
         msg = String()
         msg.data = key
         self.press_publisher.publish(msg)
         self.get_logger().info(f"'{key}' pressed")
 
-    def release(self, key):
+    def release(self, key: str):
         msg = String()
         msg.data = key
         self.release_publisher.publish(msg)
@@ -46,9 +46,9 @@ def main(args=None):
         try:
             rclpy.spin(shell_input)
         finally:
-            shell_input.stop()
             shell_input.destroy_node()
-            rclpy.shutdown()
+            shell_input.stop()
+            rclpy.try_shutdown()
     except KeyboardInterrupt:
         pass
 
