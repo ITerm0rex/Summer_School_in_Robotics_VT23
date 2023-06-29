@@ -36,6 +36,7 @@ setup(
             f"motor = {package_name}.motor:main",
             f"touch = {package_name}.touch:main",
             f"ultrasonic = {package_name}.ultrasonic:main",
+            f"test_zed_node = {package_name}.test_zed_node:main",
         ],
     },
 )

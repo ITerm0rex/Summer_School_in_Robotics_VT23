@@ -9,6 +9,24 @@ from geometry_msgs.msg import Twist, Quaternion, Point, Pose2D
 
 # import builtins
 
+def Odometry_to_Pose2D(odom: Odometry):
+    pose2d = Pose2D()
+
+    q = odom.pose.pose.orientation
+
+    siny_cosp = 2 * (q.w * q.z + q.x * q.y)
+    cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
+
+    pose2d.theta = np.arctan2(siny_cosp, cosy_cosp)
+
+    if np.abs(q.x * q.y + q.z * q.w) == 0.5:
+        pose2d.theta = 0.0
+
+    pose2d.x = odom.pose.pose.position.x
+    pose2d.y = odom.pose.pose.position.y
+
+    return pose2d
+
 
 class DifferentialDrive(Node):
     def __init__(self):
