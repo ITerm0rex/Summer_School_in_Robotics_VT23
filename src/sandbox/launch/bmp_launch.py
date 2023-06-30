@@ -70,17 +70,18 @@ def generate_launch_description():
             }
         ],
     )
-
-    touch = Node(
-        package="sandbox",
-        namespace=robot_ns,
-        executable="touch",
-        parameters=[
-            {
-                "port": 2,
-            }
-        ],
-    )
+    
+    # original build
+    # touch = Node(
+    #     package="sandbox",
+    #     namespace=robot_ns,
+    #     executable="touch",
+    #     parameters=[
+    #         {
+    #             "port": 2,
+    #         }
+    #     ],
+    # )
 
     gyro = Node(
         package="sandbox",
@@ -113,7 +114,7 @@ def generate_launch_description():
             motors,
             color,
             gyro,
-            touch,
+            # touch,
             ultrasonic,
             # shell_input,
         ]

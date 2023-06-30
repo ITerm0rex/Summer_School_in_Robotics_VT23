@@ -88,6 +88,36 @@ def generate_launch_description():
     #     ],
     # )
 
+    color_right = Node(
+        package="sandbox",
+        namespace=robot_ns,
+        executable="color",
+        name="color_right",
+        parameters=[
+            {
+                "port": 1,
+            }
+        ],
+        remappings=[
+            ("color", "right/color"),
+        ],
+    )
+
+    color_left = Node(
+        package="sandbox",
+        namespace=robot_ns,
+        executable="color",
+        name="color_left",
+        parameters=[
+            {
+                "port": 2,
+            }
+        ],
+        remappings=[
+            ("color", "left/color"),
+        ],
+    )
+
     return LaunchDescription(
         [
             robot_ns_launch_arg,
@@ -98,5 +128,7 @@ def generate_launch_description():
             motors,
             drive,
             cord_node,
+            color_right,
+            color_left,
         ]
     )

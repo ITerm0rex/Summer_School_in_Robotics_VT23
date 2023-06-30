@@ -96,6 +96,8 @@ class BMP(Node):
             "d": [360, -360],
             "e": [360, 0],
             "q": [0, 360],
+            "c": [-360, 0],
+            "z": [0, -360],
         }
 
         dir = KEY_DIR_MAP.get(key, [0, 0])
@@ -219,15 +221,27 @@ class BMP(Node):
                 lambda touched: self.bp3.reset_all() if touched else None
             )
             pass
+        elif key == "k":
+            for s in [
+                self.gyro_subscription,
+                self.color_subscription,
+                self.touch_subscription,
+                self.ultrasonic_subscription,
+            ]:
+                self.destroy_subscription(s)
+            self.bp3.reset_all()
+            pass
         elif key == "7":
             self.bp3.reset_all()
             pass
         elif key == "8":
             self.wasd_speed = (int(self.wasd_speed * 10) - 2) / 10
+            self.wasd_speed %= 2.2
             self.get_logger().info(f"wasd_speed: {self.wasd_speed}")
             pass
         elif key == "9":
             self.wasd_speed = (int(self.wasd_speed * 10) + 2) / 10
+            self.wasd_speed %= 2.2
             self.get_logger().info(f"wasd_speed: {self.wasd_speed}")
             pass
         elif key == "0":
