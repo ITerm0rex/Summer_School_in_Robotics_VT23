@@ -29,8 +29,8 @@ class UltrasonicSensor(Node):
         self.brick.set_sensor_type(self.port, self.brick.SENSOR_TYPE.EV3_ULTRASONIC_CM)
 
         # Setup ROS publisher
-        self.publisher_ = self.create_publisher(Float32, "ultrasonic", 10)
-        timer_period = 0.05  # seconds
+        self.publisher_ = self.create_publisher(Float32, "ultrasonic", 1)
+        timer_period = 0.02  # seconds
         self.timer = self.create_timer(timer_period, self.callback)
 
     # Read and publish sensor value

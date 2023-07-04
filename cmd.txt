@@ -1,0 +1,113 @@
+
+cd ~/ros2_ws
+
+source install/setup.bash
+
+
+ros2 run tutorial talker
+
+ros2 run tutorial listener
+
+
+
+cd ~/ros2_ws/src/
+
+git clone https://github.com/artificiell/ros2_path_planning.git
+
+git clone https://github.com/artificiell/ros2_aruco.git
+
+git clone https://github.com/artificiell/ros2_brickpi3.git
+
+
+colcon build --symlink-install --packages-select ros2_brickpi3
+
+
+ros2 run ros2_brickpi3 motor --ros-args -r __ns:=<ns> -p port:=<port>
+ros2 run ros2_brickpi3 motor --ros-args -r __ns:=/rp5/left -p port:=D
+
+
+rosdep install -i --from-path src --rosdistro humble -y
+
+
+cd ~/ros2_ws/ ; rm -r build install log
+
+cd ~/ros2_ws/ ; colcon build --symlink-install ; source install/setup.bash
+
+cd ~/ros2_ws/ ; source install/setup.bash
+
+
+ros2 run sandbox motor --ros-args -r __ns:=/rp5/left -p limit:=1000 -p port:=D
+
+ros2 run sandbox motor --ros-args -r __ns:=/rp5/right -p limit:=1000 -p port:=A
+
+
+ros2 launch sandbox bmp_launch.py
+
+ros2 run sandbox shell_input --ros-args -r __ns:=/rp5
+
+
+ros2 run sandbox bmp --ros-args -r __ns:=/rp5
+
+
+
+ros2 run sandbox color --ros-args -r __ns:=/rp5 -p port:=1
+
+ros2 run sandbox touch --ros-args -r __ns:=/rp5 -p port:=2
+
+ros2 run sandbox gyro --ros-args -r __ns:=/rp5 -p port:=3
+
+ros2 run sandbox ultrasonic --ros-args -r __ns:=/rp5 -p port:=4
+
+
+
+ros2 launch sandbox cord_launch.py
+
+ros2 launch sandbox drive_launch.py
+
+
+ros2 topic pub /rp5/cmd geometry_msgs/msg/Twist "{linear: {x: 0.1, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 1.8}}"
+
+
+
+
+
+
+ros2 run sandbox kill_all
+
+
+
+ros2 topic echo /rp5/ultrasonic
+
+
+ros2 topic pub /rp5/left/speed std_msgs/Int32 "{data: 20}"
+
+
+
+
+
+ros2 run sandbox my_motor --ros-args -r __ns:=/rp5/left -p limit:="'1000'" -p port:=A
+ros2 run sandbox my_motor --ros-args -r __ns:=/rp5/right -p limit:="'1000'" -p port:=D
+
+
+
+curl -kL dexterindustries.com/update_tools | bash -s -- --install-python-package --update-aptget --install-deb-deps
+
+
+ --no-dependencies=false
+  --no-update-aptget=false
+  --bypass-rfrtools=false
+  --bypass-python-rfrtools=false
+  --bypass-gui-installation=false
+  --user-local=false
+  --env-local=false
+  --system-wide=true
+
+
+
+
+curl -kL dexterindustries.com/update_brickpi3 | bash -s -- --install-python-package --update-aptget --bypass-python-rfrtools --bypass-rfrtools --system-wide --no-dependencies --bypass-gui-installation
+
+
+
+
+curl -kL dexterindustries.com/update_brickpi3 | bash -s -- --install-python-package --update-aptget --install-deb-deps

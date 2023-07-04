@@ -25,6 +25,8 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
+            f"planner_service = {package_name}.planner_service:main",
+            f"planner_client = {package_name}.planner_client:main",
             f"bmp_launch = {package_name}.bmp_launch:generate_launch_description",
             f"cord_node = {package_name}.cord_node:main",
             f"drive = {package_name}.drive:main",

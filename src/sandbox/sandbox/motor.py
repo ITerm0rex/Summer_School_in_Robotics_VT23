@@ -41,7 +41,7 @@ class MotorController(Node):
 
         # Setup ROS publisher
         self.publisher_ = self.create_publisher(Int32, "encoder", 10)
-        timer_period = 0.05  # seconds
+        timer_period = 0.02  # seconds
         self.timer = self.create_timer(timer_period, self.encoder_callback)
 
     # Write and set motor speed

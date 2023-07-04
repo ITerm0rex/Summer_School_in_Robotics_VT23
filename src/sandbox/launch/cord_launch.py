@@ -88,6 +88,12 @@ def generate_launch_description():
     #     ],
     # )
 
+    planner_service = Node(
+        package="sandbox",
+        namespace=robot_ns,
+        executable="planner_service",
+    )
+
     color_right = Node(
         package="sandbox",
         namespace=robot_ns,
@@ -130,5 +136,6 @@ def generate_launch_description():
             cord_node,
             color_right,
             color_left,
+            planner_service,
         ]
     )

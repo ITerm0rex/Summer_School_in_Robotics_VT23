@@ -30,8 +30,8 @@ class GyroSensor(Node):
         self.brick.set_sensor_type(self.port, self.brick.SENSOR_TYPE.EV3_GYRO_ABS_DPS)
 
         # Setup ROS publisher
-        self.publisher_ = self.create_publisher(Float32, "gyro", 10)
-        timer_period = 0.05  # seconds
+        self.publisher_ = self.create_publisher(Float32, "gyro", 1)
+        timer_period = 0.02  # seconds
         self.timer = self.create_timer(timer_period, self.callback)
         self.offset = None
         self.last_val = None
