@@ -228,7 +228,7 @@ class BMP(Node):
                 self.touch_subscription,
                 self.ultrasonic_subscription,
             ]:
-                self.destroy_subscription(s)
+                s.destroy()
             self.bp3.reset_all()
             pass
         elif key == "7":

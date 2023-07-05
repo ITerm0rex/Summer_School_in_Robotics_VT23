@@ -1,0 +1,5 @@
+geometry_msgs/Pose2D robot_position
+geometry_msgs/Pose2D target_position
+nav_msgs/OccupancyGrid grid_map
+---
+geometry_msgs/Pose2D[] trajectory

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import array
 import threading
 import time
 import numpy as np
@@ -16,7 +17,7 @@ import std_msgs.msg as stdMsg
 import nav_msgs.msg as navMsg
 import geometry_msgs.msg as geoMsg
 
-from ros2_path_planning.srv import PlanTrajectory2D
+from ros2_path_planning_customized.srv import PlanTrajectory2D
 from ros2_aruco_interfaces.msg import ArucoMarkers
 from brickpi3 import BrickPi3
 
@@ -30,19 +31,6 @@ Pose2D.__repr__ = (
 Pose2D.distance_to = (
     lambda self, other: np.hypot(self.x - other.x, self.y - other.y) if other else None
 )
-
-# class Pose2D(Pose2D):
-#     def __init__(self, /, follow_angle=False, **kwargs):
-#         self.follow_angle = follow_angle
-#         super().__init__(**kwargs)
-
-#     def __repr__(self):
-#         return f"Pose2D({'{'}x: {self.x}, y: {self.y}, theta: {self.theta}{'}'})"
-
-#     def distance_to(self, other: Pose2D | None) -> float | None:
-#         if not other:
-#             return None
-#         return np.hypot(self.x - other.x, self.y - other.y)
 
 
 # Converts Pose (from ArucoMarker) to Pose2D
@@ -65,22 +53,28 @@ def Pose_to_Pose2D(pose: Pose):
     return pose2d
 
 
-class DifferentialDrive(Node):
+class PathPlanningNode(Node):
     def __init__(self):
         super().__init__("cord_node")
 
         # Publish robots movement to topic '/cmd'
         self.cmd_publisher = self.create_publisher(Twist, "cmd", 10)
 
-        # ...........
+        # self.declare_parameter("grid_size", "large")
+        self.declare_parameter("grid_size", "small")
+        grid_size = self.get_parameter("grid_size").get_parameter_value().string_value
+
         self.occupancy_grid_subscription = self.create_subscription(
-            OccupancyGrid, "/map/occupancy/grid/small", self.occupancy_grid_callback, 1
+            OccupancyGrid,
+            f"/map/occupancy/grid/{grid_size}",
+            self.occupancy_grid_callback,
+            1,
         )
 
         # Gets the current position and rotation of the robot
-        self.odom_subscription = self.create_subscription(
-            Odometry, "odom", self.odom_callback, 10
-        )
+        # self.odom_subscription = self.create_subscription(
+        #     Odometry, "odom", self.odom_callback, 10
+        # )
 
         # Gets the current position of the marker
         self.location_subscription = self.create_subscription(
@@ -108,118 +102,149 @@ class DifferentialDrive(Node):
 
         self.right_color: str = None
         self.left_color: str = None
-        # self.occupancy_grid_msg: OccupancyGrid = None
 
-        timer_period_sec = 2
-        self.timer = self.create_timer(timer_period_sec, self.loop_callback)
+        self.grid_map: OccupancyGrid = None
+        self.robot_position: Pose2D = None
+        self.target_position: Pose2D = None
 
         self.cli = self.create_client(PlanTrajectory2D, "plan_trajectory")
 
-        self.future = None
         while not self.cli.wait_for_service(timeout_sec=1.0):
             self.get_logger().info("Service not available, waiting again...")
         self.plan_request = PlanTrajectory2D.Request()
         self.plan_response = PlanTrajectory2D.Response()
 
-    def loop_callback(self):
-        self.get_logger().info(str(self.get_trajectory()))
+        self.timer_update_trajectory = self.create_timer(
+            timer_period_sec=3.0, callback=self.update_trajectory
+        )
 
-        if self.future.done():
-            self.calc_trajectory()
-        pass
+        self.timer_event_loop = self.create_timer(
+            timer_period_sec=3.0, callback=self.print_info
+        )
 
-    def calc_trajectory(self):
-        if self.occupancy_grid_msg:
-            self.plan_request.grid_map = self.occupancy_grid_msg
+        self.log_filter = [
+            "trajectory",
+            "color",
+            "lost_marker",
+            "odom_path",
+        ]
 
-        self.plan_request.robot_position = Pose2D(x=8888.0)
-
-        if robot_position := self.get_marker(8):
-            self.plan_request.robot_position = robot_position
-
-        self.plan_request.target_position = Pose2D(x=1111.0)
-
-        if target_position := self.get_marker(2):
-            self.plan_request.target_position = target_position
-
-        self.get_logger().warn("!" * 50)
-        self.future = self.cli.call_async(self.plan_request)
-        self.get_logger().warn("?" * 50)
+    def print_info(self):
+        if "trajectory" not in self.log_filter:
+            self.get_logger().debug(
+                f"{self.get_trajectory() =} ", throttle_duration_sec=0.5
+            )
+        self.show_grid(self.plan_request.grid_map)
 
     def get_trajectory(self) -> list[Pose2D]:
-        # rclpy.spin_until_future_complete(self, self.future)
-        # self.get_logger().warn("¤" * 50)
-        return self.future.result()
-        # return self.future
+        return self.plan_response.trajectory
 
-    # Controls the velocity of the robot
-    def set_velocity(self, l_v=0.0, a_v=0.0):
-        twist = Twist()
-        twist.linear.x = float(l_v)
-        twist.angular.z = float(a_v)
-        self.cmd_publisher.publish(twist)
+    def future_callback(self, future: Future):
+        try:
+            self.plan_response = future.result()
+        except:
+            pass
+        self.marker_track_dict.clear()
+
+    def update_trajectory(self):
+        try:
+            if not self.future.done():
+                return
+        except:
+            pass
+
+        if self.grid_map:
+            self.plan_request.grid_map = self.grid_map
+
+        # self.plan_request.robot_position = Pose2D(x=8888.0)
+
+        # if robot_position := self.get_marker(8):
+        #     self.plan_request.robot_position = robot_position
+
+        # self.plan_request.target_position = Pose2D(x=1111.0)
+
+        # if target_position := self.get_marker(2):
+        #     self.plan_request.target_position = target_position
+
+        try:
+            self.future = self.cli.call_async(self.plan_request)
+            self.future.add_done_callback(self.future_callback)
+        except:
+            pass
 
     def get_marker(self, id: int):
         return self.marker_track_dict.get(id, None)
 
-    def show_grid(self, msg: OccupancyGrid):
-        # data = [int(p < -110) for p in msg.data]
-        # msg.info.resolution
+    # Convert position to grid cell coordinates
+    def position_to_grid_coordinates(self, position: Pose2D, grid_map: OccupancyGrid):
+        x = (position.x - grid_map.info.origin.position.x) / grid_map.info.resolution
+        y = (position.y - grid_map.info.origin.position.y) / grid_map.info.resolution
+        return int(x), int(y)
+
+    def show_grid(self, grid_map: OccupancyGrid):
         data = ""
-        index = 1
-        for cell in msg.data:
-            # data += str(cell) + " "
-            # data += " " if cell > -110 else "."
-            data += " " if cell > 100 else "."
-            if index % msg.info.width == 0:
-                data += "\n"
-            index += 1
-        # data = [" " if p < -110 else "." for p in msg.data]
-        # data = msg.data
+        index = 0
+        grid_map_data = list(grid_map.data)
+
+        if grid_map.info.width <= 30:
+            for id, marker in self.marker_track_dict.items():
+                x, y = self.position_to_grid_coordinates(marker, grid_map)
+                grid_map_data[y * grid_map.info.width + x] = str(id)
+
+            for id, path_point in enumerate(self.plan_response.trajectory):
+                x, y = self.position_to_grid_coordinates(path_point, grid_map)
+                grid_map_data[y * grid_map.info.width + x] = "." + str(id)
+
+            for id, position in {
+                "R": self.robot_position,
+                "T": self.target_position,
+            }.items():
+                x, y = self.position_to_grid_coordinates(position, grid_map)
+                grid_map_data[y * grid_map.info.width + x] = id
+
+            for cell in grid_map_data:
+                # data += str(cell) + " "
+                # data += " # " if cell else "   "
+                data += (
+                    "#" if cell == 1 else cell if isinstance(cell, str) else " "
+                ).center(2)
+                index += 1
+                if index % grid_map.info.width == 0:
+                    data += "\n"
         self.get_logger().info(
             f"OccupancyGrid: \n{(data)}"
-            # f", info: {msg.info}"
+            # f"\n{grid_map.info=}"
             ,
             throttle_duration_sec=1,
         )
 
     # Gets the location of each id in marker_track_dict and store it
     def location_callback(self, msg: ArucoMarkers):
-        for id in self.marker_track_dict:
-            if id not in msg.marker_ids:
-                self.get_logger().warn(
-                    f"-----------LOST #{id}-----------\n{msg.marker_ids}"
-                )
-
         for index, id in enumerate(msg.marker_ids):
-            # self.get_logger().info(f"ID:{id}, Index: {index}, msg.poses length: {len(msg.poses)}")
             self.marker_track_dict[id] = Pose_to_Pose2D(msg.poses[index])
-
-        # self.path_logic()
-        # self.plan_request.robot_position = self.get_marker(2)
+        if "lost_marker" not in self.log_filter:
+            for id in self.marker_track_dict:
+                if id not in msg.marker_ids:
+                    self.get_logger().warn(
+                        f"-----------LOST #{id}-----------\n{msg.marker_ids}"
+                    )
+        self.path_logic()
 
     def occupancy_grid_callback(self, msg: OccupancyGrid):
-        self.plan_request.grid_map = msg
-        self.occupancy_grid_msg = msg
+        for index in range(len(msg.data)):
+            msg.data[index] = 0 if msg.data[index] > 100 else 1
+        self.grid_map = msg
 
-    # Read color_right module
-    def color_right_callback(self, msg: String):
-        self.get_logger().info(f"color_right: {msg.data}", throttle_duration_sec=0.5)
-        self.right_color = msg.data
-
-    # Read color_left module
-    def color_left_callback(self, msg: String):
-        self.get_logger().info(f"color_left: {msg.data}", throttle_duration_sec=0.5)
-        self.left_color = msg.data
-
-    def odom_callback(self, msg: Odometry):
-        # self.current = Pose_to_Pose2D(msg.pose.pose)
-        # self.path_logic()
-        pass
+    def follow_trajectory(self):
+        for pose in self.plan_response.trajectory:
+            self.go_from_current_to_target(self.robot_position, pose)
 
     def path_logic(self):
         # Marker that the robot is currently at
-        current = self.get_marker(8)
+        current = self.get_marker(1)
+
+        if current:
+            self.robot_position = current
 
         # self.get_logger().info(str(current), throttle_duration_sec=0.5)
         # return
@@ -231,9 +256,9 @@ class DifferentialDrive(Node):
             # Pose2D(x=0.0, y=1.0),
             # Pose2D(x=0.0, y=0.0),
             # Pose2D(x=0.5, y=0.5),
-            self.get_marker(3),
+            self.get_marker(8),
             # Pose2D(x=2.0, y=2.0),
-            self.get_marker(10),
+            self.get_marker(0),
             # Pose2D(x=1.0, y=1.0),
             # current,
         ]
@@ -256,8 +281,10 @@ class DifferentialDrive(Node):
             self.set_velocity(0, 0)
             return
 
-        # self.go_from_current_to_target(current, target)
-        # return
+        self.target_position = target
+
+        self.go_from_current_to_target(current, target)
+        return
 
         if self.left_color == "red" or self.right_color == "red":
             scalar = 1
@@ -325,63 +352,64 @@ class DifferentialDrive(Node):
             if abs(a_v) >= np.deg2rad(45):
                 self.set_velocity(0.0, a_v)
             else:
-                self.set_velocity(0.2, a_v / 2)
+                self.set_velocity(0.1, a_v / 2)
 
         else:
             # The robot is within a close enough range and should move on to the next target (or loop back to the first)
             self.target_index += 1
             self.target_index %= len(self.target_list)
 
-        output = ""
-        for key, value in {
-            "distance": distance,
-            "target": target,
-            "current": current,
-            "dx": d_x,
-            "dy": d_y,
-            "av": a_v,
-        }.items():
-            output += f"{key}: {value}\n"
+        if "odom_path" not in self.log_filter:
+            output = ""
+            for key, value in {
+                "distance": distance,
+                "target": target,
+                "current": current,
+                "dx": d_x,
+                "dy": d_y,
+                "av": a_v,
+            }.items():
+                output += f"{key}: {value}\n"
 
-        self.get_logger().info(output, throttle_duration_sec=0.5)
+            self.get_logger().info(output, throttle_duration_sec=0.5)
+
+    def odom_callback(self, msg: Odometry):
+        self.robot_position = Pose_to_Pose2D(msg.pose.pose)
+        self.path_logic()
+
+    # Read color_right module
+    def color_right_callback(self, msg: String):
+        if "color" not in self.log_filter:
+            self.get_logger().info(
+                f"color_right: {msg.data}", throttle_duration_sec=0.5
+            )
+        self.right_color = msg.data
+
+    # Read color_left module
+    def color_left_callback(self, msg: String):
+        if "color" not in self.log_filter:
+            self.get_logger().info(f"color_left: {msg.data}", throttle_duration_sec=0.5)
+        self.left_color = msg.data
+
+    # Controls the velocity of the robot
+    def set_velocity(self, l_v=0.0, a_v=0.0):
+        twist = Twist()
+        twist.linear.x = float(l_v)
+        twist.angular.z = float(a_v)
+        self.cmd_publisher.publish(twist)
 
 
 # Main function
 def main(args=None):
     try:
         rclpy.init(args=args)
-        diff_drive = DifferentialDrive()
+        diff_drive = PathPlanningNode()
         try:
-            # thread = threading.Thread(
-            #     target=rclpy.spin, args=(diff_drive,), daemon=True
-            # )
-            # thread.start()
-            # rate = diff_drive.create_rate(1)
-
-            # while rclpy.ok():
-            #     # rclpy.spin_once(diff_drive)
-            #     diff_drive.get_logger().info("hej" + "." * 40)
-            #     diff_drive.get_logger().info(str(diff_drive.calc_trajectory()))
-
-            #     rate.sleep()
-
-            # rclpy.spin(diff_drive)
-            # rate = diff_drive.create_rate(2)
-            while rclpy.ok():
-                rclpy.spin_once(diff_drive)
-                if diff_drive.future:
-                    if diff_drive.future.done():
-                        rclpy.spin_until_future_complete(diff_drive, diff_drive.future)
-                # diff_drive.get_logger().info(str(diff_drive.calc_trajectory()))
-                # if diff_drive.future.done():
-                #     diff_drive.get_logger().info(str(diff_drive.future.result()))
-                # rate.sleep()
-
+            rclpy.spin(diff_drive)
         finally:
             diff_drive.destroy_node()
             rclpy.try_shutdown()
             BrickPi3().reset_all()
-            # thread.join()
     except KeyboardInterrupt:
         pass
 
