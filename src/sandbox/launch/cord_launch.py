@@ -75,6 +75,9 @@ def generate_launch_description():
         namespace=robot_ns,
         executable="cord_node",
         name="cord_node",
+        # parameters=[
+        #     "grid_size"
+        # ]
     )
 
     # gyro = Node(

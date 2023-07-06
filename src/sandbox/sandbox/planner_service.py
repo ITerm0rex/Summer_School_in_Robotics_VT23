@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
 import rclpy
+import math
 from rclpy.node import Node
 from ros2_path_planning_customized.srv import PlanTrajectory2D
-
-# from ros2_path_planning.srv import PlanTrajectory
-from geometry_msgs.msg import Pose2D
+from geometry_msgs.msg import Point, Pose2D
 from nav_msgs.msg import OccupancyGrid
 
-# Some imports that might be of interest
 import numpy as np
 from heapq import heappop, heappush
-import random
+
+
+# Node class
+class TreeNode:
+    def __init__(self, f, g, grid_coordinates, parent=None):
+        self.f = f
+        self.g = g
+        self.h = f + g
+        self.grid_coordinates = grid_coordinates
+        self.parent = parent
 
 
 # Path planning service class
@@ -23,76 +30,7 @@ class PathPlanningService(Node):
             PlanTrajectory2D, "plan_trajectory", self.service_callback
         )
 
-    # Callback function for handle a service call
-    def service_callback(
-        self, request: PlanTrajectory2D.Request, response: PlanTrajectory2D.Response
-    ):
-        self.get_logger().info(
-            # f"Got positions: robot = {request.robot_position.position}, target = {request.target_position.position}"
-            f"Got positions: robot = {request.robot_position}, target = {request.target_position}",
-            throttle_duration_sec=0.5,
-        )
-        self.get_logger().info(
-            f"Got map dimensions: width = {request.grid_map.info.width}, height = {request.grid_map.info.height}",
-            throttle_duration_sec=0.5,
-        )
-
-        try:
-            # Perform brute force random search
-            trajectory = self.random_search_algorithm(
-                request.robot_position, request.target_position, request.grid_map
-            )
-
-            # Set the resulting trajectory in the response
-            response.trajectory = trajectory
-
-        except Exception as e:
-            self.get_logger().error(f"Service error: {e}")
-
-        # Send response
-        return response
-
-    # Naive brute force random search algorithm
-    def random_search_algorithm(
-        self,
-        robot_position: Pose2D,
-        target_position: Pose2D,
-        grid_map: OccupancyGrid,
-        num_attempts=100,
-    ):
-        trajectory: list[Pose2D] = []
-
-        # Get the robot's grid cell coordinates
-        robot_x, robot_y = self.position_to_grid_coordinates(robot_position, grid_map)
-
-        # Get the target's grid cell coordinates
-        target_x, target_y = self.position_to_grid_coordinates(
-            target_position, grid_map
-        )
-
-        for _ in range(num_attempts):
-            # Generate random grid coordinates between the robot and target positions
-            x = random.randint(min(robot_x, target_x), max(robot_x, target_x))
-            y = random.randint(min(robot_y, target_y), max(robot_y, target_y))
-
-            # Check if the grid cell is unoccupied (cell value >= 0)
-            if grid_map.data[y * grid_map.info.width + x] >= 0:
-                # Calculate the corresponding position in the map frame
-                position = self.grid_coordinates_to_position(x, y, grid_map)
-
-                # Create a pose from the position
-                pose = Pose2D(x=position.x, y=position.y, theta=position.theta)
-
-                # Add the pose to the trajectory
-                trajectory.append(pose)
-
-                # Update robot position
-                robot_x, robot_y = x, y
-                if robot_x == target_x and robot_y == target_y:
-                    break
-
-        return trajectory
-
+    # fmt: off
     # Convert position to grid cell coordinates
     def position_to_grid_coordinates(self, position: Pose2D, grid_map: OccupancyGrid):
         x = int(
@@ -117,6 +55,197 @@ class PathPlanningService(Node):
             + grid_map.info.resolution / 2
         )
         return position
+
+    # Calculate straight line distance between a starting grid position and a target grid position
+    def euclidean_distance(self, position, target):
+        difference_in_x = target[0] - position[0]
+        difference_in_y = target[1] - position[1]
+        return np.hypot(difference_in_x, difference_in_y)
+
+    def manhattan_distance(self, position, target):
+        difference_in_x = abs(target[0] - position[0])
+        difference_in_y = abs(target[1] - position[1])
+        return difference_in_x + difference_in_y
+
+    # A* PATHFINDING ALGORITHM
+    # g = cost from starting point to current node (cost so far)
+    # f = straight line distance from current node to target (euclidian distance)
+    # h = f + g
+
+    def a_star(
+        self, robot_position: Pose2D, target_position: Pose2D, grid_map: OccupancyGrid
+    ):
+        # nodes to explore
+        open_list: list[TreeNode] = []
+        # nodes already explored
+        closed_list: list[TreeNode] = []
+
+        # Get the grid coordinates for the robot and the target
+        robot_grid_coordinates = self.position_to_grid_coordinates(
+            robot_position, grid_map
+        )
+        target_grid_coordinates = self.position_to_grid_coordinates(
+            target_position, grid_map
+        )
+        self.get_logger().info(f"ROBOT_POSITION: {robot_grid_coordinates}", throttle_duration_sec=0.5)
+        self.get_logger().info(f"TARGET_POSITION: {target_grid_coordinates}", throttle_duration_sec=0.5)
+        
+        distFunc = self.euclidean_distance
+        delta = 0.2
+        
+        
+        # Calculate straight line distance between starting position and target
+        f = distFunc(robot_grid_coordinates, target_grid_coordinates)
+        g = 0
+        self.get_logger().info(f"STARTING NODE: f:{f}, g:{g}", throttle_duration_sec=0.5)
+        # Create starting node and add to open array
+        starting_node = TreeNode(f, g, robot_grid_coordinates)
+        open_list.append(starting_node)
+
+        # create target node
+        target_node = TreeNode(0, 0, target_grid_coordinates)
+
+        # Find the shortest path
+        while len(open_list) > 0:
+            # self.get_logger().info(f" OPEN LIST: {open_list}")
+            # Find the best node to travel to
+            current_node = open_list[0]
+            current_index = 0
+
+            for index, node in enumerate(open_list):
+                if node.h < current_node.h:
+                    current_node = node
+                    current_index = index
+
+            # Remove from open
+            closed_list.append(open_list.pop(current_index))
+            
+            # If goal is found return the path taken
+            # ? if current_node == target_node:
+            # ? if current_node.grid_coordinates == target_grid_coordinates:
+
+            if distFunc(current_node.grid_coordinates, target_grid_coordinates) <= delta:
+                path: list[Pose2D] = []
+
+                while current_node != None:
+                    # Convert coordiantes to positions
+                    x = current_node.grid_coordinates[0]
+                    y = current_node.grid_coordinates[1]
+
+                    position = self.grid_coordinates_to_position(x, y, grid_map)
+                    path.append(position)
+                    current_node = current_node.parent
+
+                final_path = path[::-1]
+                #? self.get_logger().info(f"PATH FOUND: {final_path}")
+
+                return final_path
+            else:
+                # Generate children
+                children: list[TreeNode] = []
+                for new_coordinates in [
+                    (0, -1),
+                    (0, 1),
+                    (-1, 0),
+                    (1, 0),
+                    (-1, -1),
+                    (-1, 1),
+                    (1, -1),
+                    (1, 1),
+                ]:
+                    x = current_node.grid_coordinates[0] + new_coordinates[0]
+                    y = current_node.grid_coordinates[1] + new_coordinates[1]
+                    node_coordinates = (x, y)
+
+                    if not self.is_valid(grid_map, node_coordinates):
+                        continue
+
+                    # Calculate f,g,h for new node
+                    f = distFunc(node_coordinates, target_node.grid_coordinates)
+                    g = current_node.g + 1
+                    #  Create new node for child
+                    new_node = TreeNode(f, g, node_coordinates, current_node)
+                    # Add child to children array
+                    children.append(new_node)
+                # ? self.get_logger().info(f"children {children}")
+                # Add children array to open array
+                for child in children:
+                    # If child has already been explored then don't add it
+                    if child in closed_list:
+                        continue
+                    # If child is already in the list and the current path is slower then don't add it
+                    if (
+                        child in open_list
+                        and child.g > open_list[open_list.index(child)].g
+                    ):
+                        continue
+
+                    open_list.append(child)
+    
+
+    def is_valid(self, grid_map: OccupancyGrid, coordinates):
+        x = coordinates[0]
+        y = coordinates[1]
+        height = grid_map.info.height
+        width = grid_map.info.width
+    
+        if (
+            x >= 0
+            and x <= width
+            and y >= 0
+            and y <= height
+            and grid_map.data[y * grid_map.info.width + x] == 0
+        ):
+            #? self.get_logger().info("PASSED IS_VALID")
+            return True
+        else:
+            return False
+    # fmt: on
+
+    # Callback function for handle a service call
+    def service_callback(
+        self, request: PlanTrajectory2D.Request, response: PlanTrajectory2D.Response
+    ):
+        self.get_logger().info(f"|||INFO|||: {request.grid_map.info =} ")
+        self.get_logger().info(
+            f"Got positions: robot = {request.robot_position}, target = {request.target_position}"
+        )
+        # self.get_logger().info(
+        #     f"Got map dimensions: width = {request.grid_map.info.width}, height = {request.grid_map.info.height}"
+        # )
+
+        # ----------------------------------------
+        # Add your path planning algorithm here.
+        # ----------------------------------------
+
+        debug = False
+        if not debug:
+            path = self.a_star(
+                request.robot_position, request.target_position, request.grid_map
+            )
+
+            if path == None:
+                self.get_logger().info(f"FINAL PATH NOT FOUND")
+            else:
+                # self.get_logger().info(f"FINAL PATH: {path}")
+                self.get_logger().info(f"FINAL PATH #: {len(path)}")
+
+            if path:
+                for index, p in enumerate(path):
+                    # if index % 3 == 0:
+                    response.trajectory.append(p)
+
+        else:
+            response.trajectory.append(Pose2D(x=1.0, y=1.0))
+            response.trajectory.append(Pose2D(x=1.2, y=1.2))
+            response.trajectory.append(Pose2D(x=1.4, y=1.4))
+            response.trajectory.append(Pose2D(x=1.6, y=1.2))
+
+        # response.trajectory.append(request.robot_position)
+        # response.trajectory.append(request.target_position)
+
+        # Send resutling trajectory
+        return response
 
 
 # Main function

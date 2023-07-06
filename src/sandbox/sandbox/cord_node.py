@@ -71,6 +71,10 @@ class PathPlanningNode(Node):
             1,
         )
 
+        self.map_publisher = self.create_publisher(
+            geoMsg.PoseArray, "/map/trajectory", 10
+        )
+
         # Gets the current position and rotation of the robot
         # self.odom_subscription = self.create_subscription(
         #     Odometry, "odom", self.odom_callback, 10
@@ -78,16 +82,16 @@ class PathPlanningNode(Node):
 
         # Gets the current position of the marker
         self.location_subscription = self.create_subscription(
-            ArucoMarkers, "/robot_location", self.location_callback, 10
+            ArucoMarkers, "/robot_location", self.location_callback, 1
         )
 
-        self.color_right_subscription = self.create_subscription(
-            String, "right/color", self.color_right_callback, 10
-        )
+        # self.color_right_subscription = self.create_subscription(
+        #     String, "right/color", self.color_right_callback, 1
+        # )
 
-        self.color_left_subscription = self.create_subscription(
-            String, "left/color", self.color_left_callback, 10
-        )
+        # self.color_left_subscription = self.create_subscription(
+        #     String, "left/color", self.color_left_callback, 1
+        # )
 
         # List of positions for robot to travel to
         self.target_list: list[Pose2D | None] = []
@@ -127,6 +131,7 @@ class PathPlanningNode(Node):
             "color",
             "lost_marker",
             "odom_path",
+            "lost_lost",
         ]
 
     def print_info(self):
@@ -144,6 +149,15 @@ class PathPlanningNode(Node):
             self.plan_response = future.result()
         except:
             pass
+        # return
+        tpa = geoMsg.PoseArray()
+        for t in self.get_trajectory():
+            p = Pose()
+            p.position.x = t.x
+            p.position.y = t.y
+            tpa.poses.append(p)
+        self.map_publisher.publish(tpa)
+
         self.marker_track_dict.clear()
 
     def update_trajectory(self):
@@ -153,18 +167,23 @@ class PathPlanningNode(Node):
         except:
             pass
 
+        self.robot_position = self.get_marker(7)
+        self.target_position = self.get_marker(2)
+
         if self.grid_map:
             self.plan_request.grid_map = self.grid_map
+        else:
+            return
 
-        # self.plan_request.robot_position = Pose2D(x=8888.0)
+        if self.robot_position:
+            self.plan_request.robot_position = self.robot_position
+        else:
+            return
 
-        # if robot_position := self.get_marker(8):
-        #     self.plan_request.robot_position = robot_position
-
-        # self.plan_request.target_position = Pose2D(x=1111.0)
-
-        # if target_position := self.get_marker(2):
-        #     self.plan_request.target_position = target_position
+        if self.target_position:
+            self.plan_request.target_position = self.target_position
+        else:
+            return
 
         try:
             self.future = self.cli.call_async(self.plan_request)
@@ -186,7 +205,7 @@ class PathPlanningNode(Node):
         index = 0
         grid_map_data = list(grid_map.data)
 
-        if grid_map.info.width <= 30:
+        if 0 < grid_map.info.width and grid_map.info.width <= 60:
             for id, marker in self.marker_track_dict.items():
                 x, y = self.position_to_grid_coordinates(marker, grid_map)
                 grid_map_data[y * grid_map.info.width + x] = str(id)
@@ -196,8 +215,8 @@ class PathPlanningNode(Node):
                 grid_map_data[y * grid_map.info.width + x] = "." + str(id)
 
             for id, position in {
-                "R": self.robot_position,
-                "T": self.target_position,
+                "R": self.plan_request.robot_position,
+                "T": self.plan_request.target_position,
             }.items():
                 x, y = self.position_to_grid_coordinates(position, grid_map)
                 grid_map_data[y * grid_map.info.width + x] = id
@@ -211,24 +230,29 @@ class PathPlanningNode(Node):
                 index += 1
                 if index % grid_map.info.width == 0:
                     data += "\n"
-        self.get_logger().info(
-            f"OccupancyGrid: \n{(data)}"
-            # f"\n{grid_map.info=}"
-            ,
-            throttle_duration_sec=1,
-        )
+            self.get_logger().info(
+                f"OccupancyGrid data: \n{data}",
+                throttle_duration_sec=1,
+            )
+        else:
+            self.get_logger().info(
+                f"OccupancyGrid info: {grid_map.info}",
+                throttle_duration_sec=1,
+            )
 
     # Gets the location of each id in marker_track_dict and store it
     def location_callback(self, msg: ArucoMarkers):
         for index, id in enumerate(msg.marker_ids):
-            self.marker_track_dict[id] = Pose_to_Pose2D(msg.poses[index])
+            if id <= 20:
+                self.marker_track_dict[id] = Pose_to_Pose2D(msg.poses[index])
         if "lost_marker" not in self.log_filter:
             for id in self.marker_track_dict:
                 if id not in msg.marker_ids:
                     self.get_logger().warn(
                         f"-----------LOST #{id}-----------\n{msg.marker_ids}"
                     )
-        self.path_logic()
+        # self.path_list_logic()
+        self.follow_trajectory()
 
     def occupancy_grid_callback(self, msg: OccupancyGrid):
         for index in range(len(msg.data)):
@@ -236,18 +260,9 @@ class PathPlanningNode(Node):
         self.grid_map = msg
 
     def follow_trajectory(self):
-        for pose in self.plan_response.trajectory:
-            self.go_from_current_to_target(self.robot_position, pose)
-
-    def path_logic(self):
         # Marker that the robot is currently at
-        current = self.get_marker(1)
-
-        if current:
-            self.robot_position = current
-
-        # self.get_logger().info(str(current), throttle_duration_sec=0.5)
-        # return
+        # current = self.get_marker(7)
+        current = self.robot_position
 
         # Add each marker the robot needs to travel to
         self.target_list = [
@@ -256,35 +271,53 @@ class PathPlanningNode(Node):
             # Pose2D(x=0.0, y=1.0),
             # Pose2D(x=0.0, y=0.0),
             # Pose2D(x=0.5, y=0.5),
-            self.get_marker(8),
+            # self.get_marker(8),
             # Pose2D(x=2.0, y=2.0),
-            self.get_marker(0),
+            # self.get_marker(0),
+            *self.get_trajectory(),
             # Pose2D(x=1.0, y=1.0),
-            # current,
+            current,
         ]
 
-        target = self.target_list[self.target_index]
+        target = None
+        try:
+            self.target_index %= len(self.target_list)
+            target = self.target_list[self.target_index]
+        except:
+            pass
+
+        self.get_logger().info(
+            f"{len(self.get_trajectory()) = } {self.target_index = }",
+            throttle_duration_sec=0.5,
+        )
+
+        # if current:
+        #     self.robot_position = current
+
+        # if target:
+        #     self.target_position = target
 
         if not target or not current:
-            self.get_logger().warn(
-                "************LOST************", throttle_duration_sec=0.5
-            )
-            self.get_logger().info(
-                f"Target List: {self.target_list}", throttle_duration_sec=0.5
-            )
-            self.get_logger().info(
-                f"Markers: {self.marker_track_dict}", throttle_duration_sec=0.5
-            )
+            if "lost_lost" not in self.log_filter:
+                self.get_logger().warn(
+                    "************LOST************", throttle_duration_sec=0.5
+                )
+                self.get_logger().info(
+                    f"Target List: {self.target_list}", throttle_duration_sec=0.5
+                )
+                self.get_logger().info(
+                    f"Markers: {self.marker_track_dict}", throttle_duration_sec=0.5
+                )
             return
 
         if target is current:
             self.set_velocity(0, 0)
             return
-
-        self.target_position = target
-
-        self.go_from_current_to_target(current, target)
+        
+        
         return
+        if self.go_from_current_to_target(current, target, delta=0.3):
+            self.target_index += 1
 
         if self.left_color == "red" or self.right_color == "red":
             scalar = 1
@@ -315,8 +348,92 @@ class PathPlanningNode(Node):
 
         # self.get_logger().info(f"{self.sub_target=}")
 
-    def go_from_current_to_target(self, current: Pose2D, target: Pose2D):
+    def go_from_current_to_target(self, current: Pose2D, target: Pose2D, delta: float):
         if not target or not current:
+            return
+
+        # difference in x,y between current position and target
+        d_x = target.x - current.x
+        d_y = target.y - current.y
+        # euclidean distance - line the robot needs to travel
+        distance = np.hypot(d_x, d_y)
+
+        # arctan2 calculates the angle between the current position and the target position
+        # this tells the direction the robot will need to face
+        # by subtracting theta (where the robot is currently facing) we know how much further the robot needs to rotate to face the target
+        a_v = np.arctan2(d_y, d_x) - current.theta
+
+        # This keeps the angular velocity within the range negative pi -> pi (180 degrees = pi radians)
+        # This keeps the angular velocity within the range -180deg -> 180deg (360 degrees total)
+        if a_v > np.pi:
+            a_v = a_v - 2 * np.pi
+        elif a_v < -np.pi:
+            a_v = a_v + 2 * np.pi
+
+        if "odom_path" not in self.log_filter:
+            output = ""
+            for key, value in {
+                "distance": distance,
+                "target": target,
+                "current": current,
+                "dx": d_x,
+                "dy": d_y,
+                "av": a_v,
+            }.items():
+                output += f"{key}: {value}\n"
+
+            self.get_logger().info(output, throttle_duration_sec=0.5)
+
+        # Start travelling toward the target until distance is around 0.05
+        if distance >= delta:
+            if abs(a_v) >= np.deg2rad(45):
+                self.set_velocity(0.0, a_v)
+            else:
+                self.set_velocity(0.1, a_v)
+        else:
+            return True
+        return False
+
+    def path_list_logic(self):
+        # Marker that the robot is currently at
+        current = self.get_marker(7)
+
+        # Add each marker the robot needs to travel to
+        self.target_list = [
+            # Pose2D(x=1.0, y=0.0),
+            # Pose2D(x=1.0, y=0.0),
+            # Pose2D(x=0.0, y=1.0),
+            # Pose2D(x=0.0, y=0.0),
+            # Pose2D(x=0.5, y=0.5),
+            self.get_marker(8),
+            # Pose2D(x=2.0, y=2.0),
+            self.get_marker(0),
+            # Pose2D(x=1.0, y=1.0),
+            # current,
+        ]
+
+        target = self.target_list[self.target_index]
+
+        if current:
+            self.robot_position = current
+
+        if target:
+            self.target_position = target
+
+        if not target or not current:
+            self.get_logger().warn(
+                "************LOST************", throttle_duration_sec=0.5
+            )
+            self.get_logger().info(
+                f"Target List: {self.target_list}", throttle_duration_sec=0.5
+            )
+            self.get_logger().info(
+                f"Markers: {self.marker_track_dict}", throttle_duration_sec=0.5
+            )
+            return
+
+        if target is current:
+            self.set_velocity(0, 0)
             return
 
         # difference in x,y between current position and target
@@ -375,7 +492,7 @@ class PathPlanningNode(Node):
 
     def odom_callback(self, msg: Odometry):
         self.robot_position = Pose_to_Pose2D(msg.pose.pose)
-        self.path_logic()
+        # self.path_logic()
 
     # Read color_right module
     def color_right_callback(self, msg: String):
