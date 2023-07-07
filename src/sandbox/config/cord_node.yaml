@@ -1,0 +1,6 @@
+/rp5/cord_node:
+   ros__parameters:
+      grid_size: small
+      # grid_size: large
+      robot_position_id: 7
+      target_position_id: 10

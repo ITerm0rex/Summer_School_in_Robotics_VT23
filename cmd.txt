@@ -59,6 +59,8 @@ ros2 run sandbox gyro --ros-args -r __ns:=/rp5 -p port:=3
 ros2 run sandbox ultrasonic --ros-args -r __ns:=/rp5 -p port:=4
 
 
+cd ~/ros2_ws/ ; colcon build --symlink-install --packages-select sandbox  ; source install/setup.bash
+
 
 ros2 launch sandbox cord_launch.py
 

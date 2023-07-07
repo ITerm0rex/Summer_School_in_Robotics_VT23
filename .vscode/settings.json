@@ -1,0 +1,7 @@
+{
+	"python.analysis.extraPaths": [
+		"./ros2_ws/install/ros2_aruco_interfaces/local/lib/python3.10/dist-packages",
+		"./ros2_ws/install/ros2_path_planning/local/lib/python3.10/dist-packages",
+		"./ros2_ws/install/ros2_path_planning_customized/local/lib/python3.10/dist-packages",
+	]
+}

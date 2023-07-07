@@ -60,9 +60,24 @@ class PathPlanningNode(Node):
         # Publish robots movement to topic '/cmd'
         self.cmd_publisher = self.create_publisher(Twist, "cmd", 10)
 
-        # self.declare_parameter("grid_size", "large")
+        self.declare_parameter("robot_position_id", 7)
+        self.robot_position_id = (
+            self.get_parameter("robot_position_id").get_parameter_value().integer_value
+        )
+
+        self.get_logger().info(f"{self.robot_position_id = }")
+
+        self.declare_parameter("target_position_id", 10)
+        self.target_position_id = (
+            self.get_parameter("target_position_id").get_parameter_value().integer_value
+        )
+
+        self.get_logger().info(f"{self.target_position_id = }")
+
         self.declare_parameter("grid_size", "small")
         grid_size = self.get_parameter("grid_size").get_parameter_value().string_value
+
+        self.get_logger().info(f"{grid_size = }")
 
         self.occupancy_grid_subscription = self.create_subscription(
             OccupancyGrid,
@@ -118,9 +133,9 @@ class PathPlanningNode(Node):
         self.plan_request = PlanTrajectory2D.Request()
         self.plan_response = PlanTrajectory2D.Response()
 
-        self.timer_update_trajectory = self.create_timer(
-            timer_period_sec=3.0, callback=self.update_trajectory
-        )
+        # self.timer_update_trajectory = self.create_timer(
+        #     timer_period_sec=1.0, callback=self.update_trajectory
+        # )
 
         self.timer_event_loop = self.create_timer(
             timer_period_sec=3.0, callback=self.print_info
@@ -134,21 +149,22 @@ class PathPlanningNode(Node):
             "lost_lost",
         ]
 
+        self.future = None
+        self.flag = True
+
     def print_info(self):
         if "trajectory" not in self.log_filter:
             self.get_logger().debug(
                 f"{self.get_trajectory() =} ", throttle_duration_sec=0.5
             )
+
         self.show_grid(self.plan_request.grid_map)
 
     def get_trajectory(self) -> list[Pose2D]:
         return self.plan_response.trajectory
 
     def future_callback(self, future: Future):
-        try:
-            self.plan_response = future.result()
-        except:
-            pass
+        self.plan_response = future.result()
         # return
         tpa = geoMsg.PoseArray()
         for t in self.get_trajectory():
@@ -158,17 +174,31 @@ class PathPlanningNode(Node):
             tpa.poses.append(p)
         self.map_publisher.publish(tpa)
 
-        self.marker_track_dict.clear()
+        # self.marker_track_dict.clear()
 
     def update_trajectory(self):
-        try:
+        # self.get_logger().info(
+        #     f"update_trajectory: {None is self.grid_map = }, {self.robot_position = }, {self.target_position = }",
+        #     throttle_duration_sec=1,
+        # )
+
+        # self.robot_position = self.get_marker(2)
+        # self.robot_position = self.get_marker(7)
+        # self.target_position = self.get_marker(8)
+        # self.target_position = self.get_marker(3)
+        # self.target_position = self.get_marker(10)
+
+        self.robot_position = self.get_marker(self.robot_position_id)
+        self.target_position = self.get_marker(self.target_position_id)
+
+        if self.future:
             if not self.future.done():
                 return
-        except:
-            pass
 
-        self.robot_position = self.get_marker(7)
-        self.target_position = self.get_marker(2)
+        if self.flag and self.grid_map and self.robot_position and self.target_position:
+            self.flag = False
+        else:
+            return
 
         if self.grid_map:
             self.plan_request.grid_map = self.grid_map
@@ -188,7 +218,7 @@ class PathPlanningNode(Node):
         try:
             self.future = self.cli.call_async(self.plan_request)
             self.future.add_done_callback(self.future_callback)
-        except:
+        finally:
             pass
 
     def get_marker(self, id: int):
@@ -198,6 +228,8 @@ class PathPlanningNode(Node):
     def position_to_grid_coordinates(self, position: Pose2D, grid_map: OccupancyGrid):
         x = (position.x - grid_map.info.origin.position.x) / grid_map.info.resolution
         y = (position.y - grid_map.info.origin.position.y) / grid_map.info.resolution
+        y = np.clip(y, 0, grid_map.info.width - 1)
+        x = np.clip(x, 0, grid_map.info.height - 1)
         return int(x), int(y)
 
     def show_grid(self, grid_map: OccupancyGrid):
@@ -210,23 +242,24 @@ class PathPlanningNode(Node):
                 x, y = self.position_to_grid_coordinates(marker, grid_map)
                 grid_map_data[y * grid_map.info.width + x] = str(id)
 
-            for id, path_point in enumerate(self.plan_response.trajectory):
+            for id, path_point in enumerate(self.get_trajectory()):
                 x, y = self.position_to_grid_coordinates(path_point, grid_map)
                 grid_map_data[y * grid_map.info.width + x] = "." + str(id)
 
             for id, position in {
-                "R": self.plan_request.robot_position,
-                "T": self.plan_request.target_position,
+                "R": self.robot_position,
+                "T": self.target_position,
             }.items():
-                x, y = self.position_to_grid_coordinates(position, grid_map)
-                grid_map_data[y * grid_map.info.width + x] = id
+                if position:
+                    x, y = self.position_to_grid_coordinates(position, grid_map)
+                    grid_map_data[y * grid_map.info.width + x] = id
 
             for cell in grid_map_data:
-                # data += str(cell) + " "
+                # data += hex(cell)[2:].center(3)
                 # data += " # " if cell else "   "
                 data += (
                     "#" if cell == 1 else cell if isinstance(cell, str) else " "
-                ).center(2)
+                ).center(3)
                 index += 1
                 if index % grid_map.info.width == 0:
                     data += "\n"
@@ -252,9 +285,14 @@ class PathPlanningNode(Node):
                         f"-----------LOST #{id}-----------\n{msg.marker_ids}"
                     )
         # self.path_list_logic()
+        self.update_trajectory()
         self.follow_trajectory()
 
     def occupancy_grid_callback(self, msg: OccupancyGrid):
+        self.get_logger().info(
+            f"occupancy_grid: {len(msg.data) = }, {msg.info = }",
+            throttle_duration_sec=2.0,
+        )
         for index in range(len(msg.data)):
             msg.data[index] = 0 if msg.data[index] > 100 else 1
         self.grid_map = msg
@@ -288,7 +326,7 @@ class PathPlanningNode(Node):
 
         self.get_logger().info(
             f"{len(self.get_trajectory()) = } {self.target_index = }",
-            throttle_duration_sec=0.5,
+            throttle_duration_sec=1.0,
         )
 
         # if current:
@@ -313,11 +351,10 @@ class PathPlanningNode(Node):
         if target is current:
             self.set_velocity(0, 0)
             return
-        
-        
-        return
-        if self.go_from_current_to_target(current, target, delta=0.3):
+
+        if self.go_from_current_to_target(current, target, delta=0.2):
             self.target_index += 1
+        return
 
         if self.left_color == "red" or self.right_color == "red":
             scalar = 1
@@ -389,7 +426,7 @@ class PathPlanningNode(Node):
             if abs(a_v) >= np.deg2rad(45):
                 self.set_velocity(0.0, a_v)
             else:
-                self.set_velocity(0.1, a_v)
+                self.set_velocity(0.2, a_v)
         else:
             return True
         return False

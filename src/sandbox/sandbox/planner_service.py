@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import time
 import rclpy
 import math
 from rclpy.node import Node
@@ -10,6 +11,9 @@ import numpy as np
 from heapq import heappop, heappush
 
 
+from rclpy.duration import Duration
+
+
 # Node class
 class TreeNode:
     def __init__(self, f, g, grid_coordinates, parent=None):
@@ -18,6 +22,12 @@ class TreeNode:
         self.h = f + g
         self.grid_coordinates = grid_coordinates
         self.parent = parent
+
+    def __eq__(self, __value: object) -> bool:
+        try:
+            return self.grid_coordinates == __value.grid_coordinates
+        except:
+            return False
 
 
 # Path planning service class
@@ -66,7 +76,13 @@ class PathPlanningService(Node):
         difference_in_x = abs(target[0] - position[0])
         difference_in_y = abs(target[1] - position[1])
         return difference_in_x + difference_in_y
-
+    
+    def man_euc_distance(self, position, target, exp = 1.0):
+        difference_in_x = target[0] - position[0]
+        difference_in_y = target[1] - position[1]
+        return np.power(np.power(abs(difference_in_x), exp) + np.power(abs(difference_in_y), exp), 1/exp)
+        # return self.manhattan_distance(position, target) * 0.3 + self.euclidean_distance(position, target) * 0.7
+    
     # A* PATHFINDING ALGORITHM
     # g = cost from starting point to current node (cost so far)
     # f = straight line distance from current node to target (euclidian distance)
@@ -75,10 +91,20 @@ class PathPlanningService(Node):
     def a_star(
         self, robot_position: Pose2D, target_position: Pose2D, grid_map: OccupancyGrid
     ):
+        distFunc = self.man_euc_distance
+        # distFunc = self.manhattan_distance
+        # distFunc = self.euclidean_distance
+        delta = 1.0
+        
+        
+        
+        
         # nodes to explore
         open_list: list[TreeNode] = []
         # nodes already explored
         closed_list: list[TreeNode] = []
+
+        nodes_explored = 0
 
         # Get the grid coordinates for the robot and the target
         robot_grid_coordinates = self.position_to_grid_coordinates(
@@ -89,10 +115,6 @@ class PathPlanningService(Node):
         )
         self.get_logger().info(f"ROBOT_POSITION: {robot_grid_coordinates}", throttle_duration_sec=0.5)
         self.get_logger().info(f"TARGET_POSITION: {target_grid_coordinates}", throttle_duration_sec=0.5)
-        
-        distFunc = self.euclidean_distance
-        delta = 0.2
-        
         
         # Calculate straight line distance between starting position and target
         f = distFunc(robot_grid_coordinates, target_grid_coordinates)
@@ -119,6 +141,8 @@ class PathPlanningService(Node):
 
             # Remove from open
             closed_list.append(open_list.pop(current_index))
+            nodes_explored += 1 
+            self.get_logger().info(f"Nodes Explored: {nodes_explored}", throttle_duration_sec=0.5)
             
             # If goal is found return the path taken
             # ? if current_node == target_node:
@@ -126,15 +150,15 @@ class PathPlanningService(Node):
 
             if distFunc(current_node.grid_coordinates, target_grid_coordinates) <= delta:
                 path: list[Pose2D] = []
-
-                while current_node != None:
+                current = current_node
+                while current != None:
                     # Convert coordiantes to positions
-                    x = current_node.grid_coordinates[0]
-                    y = current_node.grid_coordinates[1]
+                    x = current.grid_coordinates[0]
+                    y = current.grid_coordinates[1]
 
                     position = self.grid_coordinates_to_position(x, y, grid_map)
                     path.append(position)
-                    current_node = current_node.parent
+                    current = current.parent
 
                 final_path = path[::-1]
                 #? self.get_logger().info(f"PATH FOUND: {final_path}")
@@ -151,7 +175,7 @@ class PathPlanningService(Node):
                     (-1, -1),
                     (-1, 1),
                     (1, -1),
-                    (1, 1),
+                    (1, 1)
                 ]:
                     x = current_node.grid_coordinates[0] + new_coordinates[0]
                     y = current_node.grid_coordinates[1] + new_coordinates[1]
@@ -172,15 +196,18 @@ class PathPlanningService(Node):
                 for child in children:
                     # If child has already been explored then don't add it
                     if child in closed_list:
+                        self.get_logger().info("CHILD IN CLOSED LIST", throttle_duration_sec=0.5)
                         continue
                     # If child is already in the list and the current path is slower then don't add it
                     if (
                         child in open_list
                         and child.g > open_list[open_list.index(child)].g
                     ):
+                        self.get_logger().info("CHILD IN OPEN LIST", throttle_duration_sec=0.5)
                         continue
 
                     open_list.append(child)
+        return None
     
 
     def is_valid(self, grid_map: OccupancyGrid, coordinates):
@@ -191,10 +218,10 @@ class PathPlanningService(Node):
     
         if (
             x >= 0
-            and x <= width
+            and x < width
             and y >= 0
-            and y <= height
-            and grid_map.data[y * grid_map.info.width + x] == 0
+            and y < height
+            and grid_map.data[y * width + x] == 0
         ):
             #? self.get_logger().info("PASSED IS_VALID")
             return True
@@ -206,7 +233,7 @@ class PathPlanningService(Node):
     def service_callback(
         self, request: PlanTrajectory2D.Request, response: PlanTrajectory2D.Response
     ):
-        self.get_logger().info(f"|||INFO|||: {request.grid_map.info =} ")
+        self.get_logger().info(f"|||INFO|||: {request.grid_map.info = } ")
         self.get_logger().info(
             f"Got positions: robot = {request.robot_position}, target = {request.target_position}"
         )
@@ -218,7 +245,7 @@ class PathPlanningService(Node):
         # Add your path planning algorithm here.
         # ----------------------------------------
 
-        debug = False
+        debug = not True
         if not debug:
             path = self.a_star(
                 request.robot_position, request.target_position, request.grid_map
@@ -229,13 +256,16 @@ class PathPlanningService(Node):
             else:
                 # self.get_logger().info(f"FINAL PATH: {path}")
                 self.get_logger().info(f"FINAL PATH #: {len(path)}")
+                # self.get_logger().info(f"FINAL PATH #: {path}")
 
             if path:
                 for index, p in enumerate(path):
-                    # if index % 3 == 0:
-                    response.trajectory.append(p)
+                    if index % 2 == 0:
+                        response.trajectory.append(p)
 
         else:
+            # time.sleep(2)
+            # self.get_clock().sleep_for(Duration(seconds=2))
             response.trajectory.append(Pose2D(x=1.0, y=1.0))
             response.trajectory.append(Pose2D(x=1.2, y=1.2))
             response.trajectory.append(Pose2D(x=1.4, y=1.4))
@@ -245,6 +275,10 @@ class PathPlanningService(Node):
         # response.trajectory.append(request.target_position)
 
         # Send resutling trajectory
+        self.get_logger().info(
+            f"!!!!!!!!!!!!!!!!!!!!!!!!!{len(response.trajectory) = } "
+        )
+
         return response
 
 

@@ -7,6 +7,9 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 
+import os
+from ament_index_python.packages import get_package_share_directory
+
 
 def generate_launch_description():
     # Launch configuration
@@ -70,14 +73,16 @@ def generate_launch_description():
         ],
     )
 
+    cord_node_config = os.path.join(
+        get_package_share_directory("sandbox"), "config", "cord_node.yaml"
+    )
+
     cord_node = Node(
         package="sandbox",
         namespace=robot_ns,
         executable="cord_node",
         name="cord_node",
-        # parameters=[
-        #     "grid_size"
-        # ]
+        parameters=[cord_node_config],
     )
 
     # gyro = Node(
